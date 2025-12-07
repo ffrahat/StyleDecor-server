@@ -52,6 +52,7 @@ async function run() {
       // Crud Operations
       const db = client.db('style_decor_db');
       const usersCollection = db.collection('users');
+      const servicesCollection = db.collection('services');
 
 
       //   Users Related APis
@@ -86,11 +87,45 @@ async function run() {
             res.status(500).send({ message: 'Internal Server Error' });
           }
       })
+    
+    
+    
+    // Services Related Apis
+    app.get('/services', async (req, res) => {
+      const result = await servicesCollection.find().toArray();
+      res.send(result)
+    })
       
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
       
   } finally {
     // Ensures that the client will close when you finish/error
-    await client.close();
+    // await client.close();
   }
 }
 run().catch(console.dir);
