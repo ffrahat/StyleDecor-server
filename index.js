@@ -52,7 +52,8 @@ async function run() {
       // Crud Operations
       const db = client.db('style_decor_db');
       const usersCollection = db.collection('users');
-      const servicesCollection = db.collection('services');
+    const servicesCollection = db.collection('services');
+    const bookingsCollection = db.collection('bookings')
 
 
       //   Users Related APis
@@ -101,13 +102,47 @@ async function run() {
       try {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) }
-        const cursor = servicesCollection.find(query);
-        const result = await cursor.toArray();
+        const result = await servicesCollection.findOne(query);
         res.status(200).send(result)
       } catch (error) {
         console.log(error);
         res.status(500).send({ message: 'Internal Server Error' });
       }
+    })
+
+
+
+
+    // Bookings related apis
+
+    app.get('/my-bookings', async (req, res) => {
+      try {
+        const { email } = req.query;
+        const query = {};
+      if (email) {
+        query.client_email = email;
+      }
+        const result = await bookingsCollection.find(query).sort({created_At: -1}).toArray();
+        res.status(200).send(result);
+      } catch (error) {
+        console.log(error);
+        res.status(500).send({message: "Internal Server Error"})
+      }
+    })
+
+
+
+    app.post('/bookings', async (req, res) => {
+      try {
+        const bookingInfo = req.body;
+        bookingInfo.created_At = new Date();
+        const result = await bookingsCollection.insertOne(bookingInfo);
+        res.send(result);
+      } catch (error) {
+        console.log(error)
+        res.status(500).send({message: "Internal Server Error"})
+      }
+
     })
       
 
