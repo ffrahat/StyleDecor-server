@@ -45,23 +45,49 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     
-      await client.connect();
-      await client.db("admin").command({ ping: 1 });
-      console.log("Pinged your deployment. You successfully connected to MongoDB!");
+      // await client.connect();
+      // await client.db("admin").command({ ping: 1 });
+      // console.log("Pinged your deployment. You successfully connected to MongoDB!");
         
 
       // Crud Operations
       const db = client.db('style_decor_db');
       const usersCollection = db.collection('users');
     const servicesCollection = db.collection('services');
-    const bookingsCollection = db.collection('bookings')
+    const bookingsCollection = db.collection('bookings');
+    const paymentsCollection = db.collection('payments');
+    const decoratorsCollection = db.collection('decorators');
 
 
       //   Users Related APis
       
       app.get('/users', async (req, res) => {
-          try {
-            const cursor = usersCollection.find();
+        try {
+          const { searchText, sort } = req.query;
+          const query = {};
+          if (searchText) {
+            // query.$or = [
+            //   {displayName : {$regex : searchText, $options: 'i'}}
+            // ]
+
+            // query.$or = [
+            //   { displayName: { $regex: searchText, $options: "i" } },
+            //   { email: { $regex: searchText, $options: "i" } },
+            // ];
+
+            query.$or = [
+              { name: { $regex: searchText, $options: 'i' } },
+              { email: { $regex: searchText, $options: 'i' } }
+            ]
+
+          }
+
+          if (sort) {
+            query.role = sort;
+          }
+
+
+            const cursor = usersCollection.find(query);
             const result = await cursor.toArray();
             res.status(200).send(result)
           }catch (error) {
@@ -69,6 +95,10 @@ async function run() {
             res.status(500).send({ message: 'Internal Server Error' });
           }
       })
+    
+      
+    
+    
 
       app.post('/users', async (req, res) => {
           try {
@@ -94,7 +124,26 @@ async function run() {
     
     // Services Related Apis
     app.get('/services', async (req, res) => {
-      const result = await servicesCollection.find().toArray();
+
+      // Sort
+      const { sort = 'cost', order, searchText } = req.query; 
+      console.log(searchText)
+      const sortOption = {};
+
+      sortOption[sort || 'cost'] = order === 'asc' ? 1 : -1;
+
+// Search
+      const query = {};
+
+      if(searchText){
+        query.$or = [
+          { service_name: { $regex: searchText, $options: 'i' } },
+          { service_category: {$regex: searchText, $options: 'i' }}
+        ]
+      }
+      
+      const cursor = servicesCollection.find(query).sort(sortOption);
+      const result = await cursor.toArray();
       res.send(result)
     })
 
@@ -109,6 +158,15 @@ async function run() {
         console.log(error);
         res.status(500).send({ message: 'Internal Server Error' });
       }
+    })
+
+
+    // Add Services Adimin
+
+    app.post('/services', async (req, res) => {
+      const newServiceInfo = req.body;
+      const result = await servicesCollection.insertOne(newServiceInfo);
+      res.send(result)
     })
 
 
@@ -130,6 +188,22 @@ async function run() {
         res.status(500).send({message: "Internal Server Error"})
       }
     })
+
+    // cancel booking
+    app.patch('/cancel-booking', async (req, res) => {
+      const cancelId = req.query.cancel_id;
+      if (cancelId) {
+        const cancelQuery = {_id: new ObjectId(cancelId)}
+        const cancelInfo = {
+          $set: {
+            service_status: "cancelled"
+          }
+        }
+        const cancelBooking = await bookingsCollection.updateOne(cancelQuery, cancelInfo);
+        res.send(cancelBooking)
+      }
+    })
+
 
 
 
@@ -154,7 +228,7 @@ async function run() {
       const query = { _id: new ObjectId(serviceId) }
       const booked_services_info = await servicesCollection.findOne(query);
       const booking_cost = booked_services_info.cost;
-
+    
 
       // Convert BDT → USD cents
       const usdCents = Math.round(booking_cost / 127.1409 * 100);
@@ -171,7 +245,11 @@ async function run() {
             price_data: {
               currency: "usd",
               product_data: {
-                name: "Test Hardcoded Service"
+                name: booked_services_info?.service_name || 'Unnamed Service',
+                images: [
+                  booked_services_info?.images[0]?.url ||
+                  'https://example.com/default-image.png'
+                ],
               },
               unit_amount: finalAmount
             },
@@ -186,7 +264,7 @@ async function run() {
         },
         customer_email: email,
         mode: 'payment',
-        success_url: `${process.env.SITE_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${process.env.SITE_DOMAIN}/payment-cancel`,
       })
 
@@ -195,6 +273,75 @@ async function run() {
     });
       
 
+
+    // Validate payment
+    app.patch('/payment-success', async (req, res) => {
+      const session = await stripe.checkout.sessions.retrieve(
+        req.query.session_id
+      );
+
+      if (session.payment_status === 'paid') {
+        const serviceId = session.metadata.serviceId;
+        const client_email = session.customer_email;
+        const booking_id = session.metadata.booking_id;
+        const transitionId = session.payment_intent;
+        const payment_status = session.payment_status;
+
+        // Update booking info
+        const bookingQuery = { _id: new ObjectId(booking_id) };
+        const bookingInfo = {
+        $set: {
+          payment_status: "paid",
+          service_status: "service_on_the_way"
+          }
+        }
+        const result = await bookingsCollection.updateOne(bookingQuery, bookingInfo);
+        const bookingDetails = await bookingsCollection.findOne(bookingQuery);
+        console.log('booking details bm rahat', bookingDetails)
+        
+
+        // Insert Payment info
+
+        const paymentInfo = {
+          serviceId,
+          booking_id,
+          booking_cost: bookingDetails.booking_cost,
+          payment_status,
+          client_email,
+          transitionId,
+          paidAt: new Date()
+        }
+
+        
+        // Payment Exist
+        const existQuery = { transitionId };
+
+        const paymentExist = await paymentsCollection.findOne(existQuery);
+
+        if (paymentExist) {
+          return res.send({messsage: 'Payment already done!', transitionId})
+        }
+
+        const paymentResult = await paymentsCollection.insertOne(paymentInfo);
+        console.log(session)
+        res.send({ result, transitionId, paymentResult })
+      }
+
+     
+      
+    })
+
+
+    // Decorators related apis
+    app.post('/decorators', async (req, res) => {
+      const decoratorsInfo = req.body;
+      decoratorsInfo.application_At = new Date();
+      decoratorsInfo.application_status = 'pending';
+      const result = await decoratorsCollection.insertOne(decoratorsInfo);
+      res.send(result)
+    })
+
+    
 
 
 
