@@ -12,7 +12,31 @@ const stripe = require('stripe')(`${process.env.STRIPE_SECRET}`);
 app.use(express.json());
 app.use(cors());
 
-// Verify FIrebase Token
+
+// Verify Firebase Token
+const verifyFirebaseToken = async (req, res, next) => {
+  try {
+    const authToken = req.headers.authorization;
+    if (!authToken) {
+      return res.status(401).send({ message: 'No token provided' });
+    }
+
+    const token = authToken.split(' ')[1];
+    if (!token) {
+      return res.status(401).send({ message: 'Invalid token format' });
+    }
+
+    // Firebase Admin  token verify
+    const decodedUser = await admin.auth().verifyIdToken(token);
+    console.log(decodedUser)
+    req.user = decodedUser; 
+
+    next(); 
+
+  } catch (error) {
+    return res.status(401).send({ message: 'Unauthorized: Invalid token' });
+  }
+};
 
 
 
@@ -21,8 +45,10 @@ app.use(cors());
 // Firebase
 const admin = require("firebase-admin");
 
+const decoded = process.env.FIREBASE_SERVICE_KEY;
+const serviceAccount = JSON.parse(Buffer.from(decoded, "base64").toString("utf8"));
+
 // Firebase service account
-const serviceAccount = require("./styledecor-2025-firebase-adminsdk.json");
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
@@ -45,9 +71,9 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     
-      // await client.connect();
-      // await client.db("admin").command({ ping: 1 });
-      // console.log("Pinged your deployment. You successfully connected to MongoDB!");
+      await client.connect();
+      await client.db("admin").command({ ping: 1 });
+      console.log("Pinged your deployment. You successfully connected to MongoDB!");
         
 
       // Crud Operations
@@ -57,11 +83,12 @@ async function run() {
     const bookingsCollection = db.collection('bookings');
     const paymentsCollection = db.collection('payments');
     const decoratorsCollection = db.collection('decorators');
+    const coveragesCollection = db.collection('coverage');
 
 
       //   Users Related APis
       
-      app.get('/users', async (req, res) => {
+      app.get('/users',verifyFirebaseToken, async (req, res) => {
         try {
           const { searchText, sort } = req.query;
           const query = {};
@@ -96,6 +123,21 @@ async function run() {
           }
       })
     
+    
+    // User role 
+    app.get("/users/:email/role", verifyFirebaseToken,  async (req, res) => {
+      const email = req.params.email;
+      const query = { email };
+      const user = await usersCollection.findOne(query);
+      res.send({ role: user?.role || "user" });
+    });
+
+
+    // coverage 
+    app.get('/coverages', async (req, res) => {
+      const result = await coveragesCollection.find().toArray();
+      res.send(result)
+    })
       
     
     
@@ -119,6 +161,126 @@ async function run() {
             res.status(500).send({ message: 'Internal Server Error' });
           }
       })
+    
+    
+    
+    // Update role
+    
+    app.patch('/users/role', verifyFirebaseToken, async (req, res) => {
+      const { id, role } = req.query;
+      console.log(id, role)
+      const query = { _id: new ObjectId(id) };
+      const updateRole = {
+        $set: {
+          role: role
+        }
+      }
+
+      const result = await usersCollection.updateOne(query, updateRole);
+      res.send(result)
+
+    })
+
+
+
+    // Decorators releted apis
+
+    
+
+
+
+    app.get('/decorators',verifyFirebaseToken, async (req, res) => {
+      const result = await decoratorsCollection.find().toArray();
+      res.send(result)
+    })
+
+
+    // top 
+    app.get('/top-decorators', async (req, res) => {
+      const result = await decoratorsCollection.find().sort({application_At: -1}).limit(3).toArray();
+      res.send(result)
+    })
+
+
+
+    // Decorators related apis
+    app.post('/decorators',verifyFirebaseToken, async (req, res) => {
+      const decoratorsInfo = req.body;
+      const query = { email: decoratorsInfo.email }
+      
+      const existApply = await decoratorsCollection.findOne(query);
+      if (existApply) {
+        return res.send({message: "Already Applied!"})
+      }
+
+      decoratorsInfo.application_At = new Date();
+      decoratorsInfo.application_status = 'pending';
+      const result = await decoratorsCollection.insertOne(decoratorsInfo);
+      res.send(result)
+    })
+
+
+        
+    // Update role
+    
+    app.patch('/decorators/role',verifyFirebaseToken, async (req, res) => {
+      const { email, role, application_status } = req.query;
+      const query = { email: email };
+
+      
+
+
+      if (application_status === 'reject') {
+        // update application status reject
+      const updateApplicationStatus = {
+        $set: {
+          application_status: application_status
+        }
+        }
+        
+
+      
+
+      const decorators = await decoratorsCollection.updateOne(query, updateApplicationStatus);
+
+      return res.send(decorators)
+
+      }
+
+
+      console.log(email, role, application_status)
+     
+      
+      
+      // update user role
+      const updateRole = {
+        $set: {
+          role: role
+        }
+      }
+
+      const result = await usersCollection.updateOne(query, updateRole);
+
+      // update application status
+      const updateApplicationStatus = {
+        $set: {
+          application_status: application_status,
+          work_status: 'available'
+        }
+      }
+
+      const decorators = await decoratorsCollection.updateOne(query, updateApplicationStatus);
+
+      res.send(decorators)
+
+    })
+    
+
+
+
+    
+    
+    
     
     
     
@@ -163,10 +325,44 @@ async function run() {
 
     // Add Services Adimin
 
-    app.post('/services', async (req, res) => {
+    app.post('/services', verifyFirebaseToken, async (req, res) => {
       const newServiceInfo = req.body;
       const result = await servicesCollection.insertOne(newServiceInfo);
       res.send(result)
+    })
+
+
+    // edit service 
+    app.patch('/services/:id/edit', verifyFirebaseToken, async (req, res) => {
+      const info = req.body;
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const updateInfo = {
+        $set: {
+          service_name: info.service_name,
+          service_category: info.service_category,
+          cost: info.cost,  
+          description: info.description,
+          imageUrl: info.imageUrl,
+          images: info.images,
+          unit: info.unit,
+          createdByEmail: info.createdByEmail,
+          currency: info.currency
+        }
+      }
+ 
+
+      const result = await servicesCollection.updateOne(query, updateInfo);
+      res.send(result)
+       
+    })
+
+    // delete service
+    app.delete('/services/:id/delete',verifyFirebaseToken, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await servicesCollection.deleteOne(query);
+      res.send(result);
     })
 
 
@@ -174,7 +370,33 @@ async function run() {
 
     // Bookings related apis
 
-    app.get('/my-bookings', async (req, res) => {
+    app.get('/bookings',verifyFirebaseToken, async (req, res) => {
+      
+      const { sort } = req.query;
+      console.log(sort)
+
+      const sortBy = sort.split('=')[0];
+      const sortOrder = sort.split('=')[1]
+      
+      const query = {};
+      if (sort) {
+        query[sortBy] = sortOrder;
+
+
+        // if paid not showing cancelled
+        if (sortBy === 'payment_status' && sortOrder === 'paid') {
+          query.service_status = { $ne: 'cancelled' };
+        }
+      }
+
+      console.log(query)
+
+      
+      const result = await bookingsCollection.find(query).sort({paidAt: -1}).toArray(); //admin
+      res.send(result);
+    }) 
+//decoded need
+    app.get('/my-bookings', verifyFirebaseToken, async (req, res) => {
       try {
         const { email } = req.query;
         const query = {};
@@ -190,7 +412,7 @@ async function run() {
     })
 
     // cancel booking
-    app.patch('/cancel-booking', async (req, res) => {
+    app.patch('/cancel-booking',verifyFirebaseToken, async (req, res) => {
       const cancelId = req.query.cancel_id;
       if (cancelId) {
         const cancelQuery = {_id: new ObjectId(cancelId)}
@@ -204,10 +426,19 @@ async function run() {
       }
     })
 
+    // delete my bookings
+
+    app.delete('/my-bookings/:id/delete',verifyFirebaseToken, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await bookingsCollection.deleteOne(query);
+      res.send(result);
+    })
 
 
 
-    app.post('/bookings', async (req, res) => {
+
+    app.post('/bookings',verifyFirebaseToken, async (req, res) => {
       try {
         const bookingInfo = req.body;
         bookingInfo.created_At = new Date();
@@ -332,14 +563,7 @@ async function run() {
     })
 
 
-    // Decorators related apis
-    app.post('/decorators', async (req, res) => {
-      const decoratorsInfo = req.body;
-      decoratorsInfo.application_At = new Date();
-      decoratorsInfo.application_status = 'pending';
-      const result = await decoratorsCollection.insertOne(decoratorsInfo);
-      res.send(result)
-    })
+    
 
     
 
