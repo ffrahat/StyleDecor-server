@@ -183,14 +183,27 @@ async function run() {
 
 
 
-    // Decorators releted apis
 
     
 
 
+  // Decorators related apis
+    app.get('/decorators',  async (req, res) => {
+      
+      const { work_status, application_status, district } = req.query;
+      const query = {}
 
-    app.get('/decorators',verifyFirebaseToken, async (req, res) => {
-      const result = await decoratorsCollection.find().toArray();
+      console.log('dis' , district)
+
+      if (district) {
+        query.district = district;
+        query.work_status = work_status;
+        query.application_status = application_status;
+      }
+
+      console.log(query)
+
+      const result = await decoratorsCollection.find(query).sort({application_At: -1}).toArray();
       res.send(result)
     })
 
@@ -203,8 +216,67 @@ async function run() {
 
 
 
-    // Decorators related apis
-    app.post('/decorators',verifyFirebaseToken, async (req, res) => {
+    // Assign Decorators
+    app.patch('/assign-decorator', async (req, res) => {
+      const { booking_id } = req.query;
+      const decoratorInfo = req.body;
+
+      // Update booking info
+      const bookingQuery = { _id: new ObjectId(booking_id) }
+      const bookingInfo = {
+        $set: {
+          service_status: 'assigned',
+          decorator_email: decoratorInfo.email,
+          decorator_name: decoratorInfo.name
+        }
+      }
+      const bookingResult = await bookingsCollection.updateOne(bookingQuery, bookingInfo);
+
+      // Update Decorator
+
+      const decoratorQuery = { _id: new ObjectId(decoratorInfo._id) };
+      const decInfo = {
+        $set: {
+           work_status: 'on_delivery'
+        }
+      }
+
+      const decoratroResult = await decoratorsCollection.updateOne(decoratorQuery, decInfo)
+      res.send(decoratroResult)
+
+    })
+
+
+    // My Asssign Project 
+    app.get('/my-assigned-projects', async (req, res) => {
+      const { email } = req.query;
+      
+      const query = {decorator_email: email };
+      const result = await bookingsCollection.find(query).toArray();
+      res.send(result);
+    })
+
+
+    // update service status by decorators
+    app.patch('/update-service-status', async (req, res) => {
+      const { id } = req.query;
+      const serviceStatus = req.body;
+      const query = { _id: new ObjectId(id) };
+      const updatedDoc = {
+        $set: {
+          service_status: serviceStatus.service_status
+        }
+      }
+
+      const result = await bookingsCollection.updateOne(query, updatedDoc);
+      res.send(result);
+
+    } )
+
+
+
+    // application decorators
+    app.post('/decorators', verifyFirebaseToken, async (req, res) => {
       const decoratorsInfo = req.body;
       const query = { email: decoratorsInfo.email }
       
@@ -227,9 +299,6 @@ async function run() {
       const { email, role, application_status } = req.query;
       const query = { email: email };
 
-      
-
-
       if (application_status === 'reject') {
         // update application status reject
       const updateApplicationStatus = {
@@ -237,8 +306,7 @@ async function run() {
           application_status: application_status
         }
         }
-        
-
+    
       
 
       const decorators = await decoratorsCollection.updateOne(query, updateApplicationStatus);
@@ -370,6 +438,8 @@ async function run() {
 
     // Bookings related apis
 
+
+
     app.get('/bookings',verifyFirebaseToken, async (req, res) => {
       
       const { sort } = req.query;
@@ -385,14 +455,14 @@ async function run() {
 
         // if paid not showing cancelled
         if (sortBy === 'payment_status' && sortOrder === 'paid') {
-          query.service_status = { $ne: 'cancelled' };
+          query.service_status = 'service_on_the_way';
         }
       }
 
       console.log(query)
 
       
-      const result = await bookingsCollection.find(query).sort({paidAt: -1}).toArray(); //admin
+      const result = await bookingsCollection.find(query).sort({created_At: -1}).toArray(); //admin
       res.send(result);
     }) 
 //decoded need
@@ -496,7 +566,7 @@ async function run() {
         customer_email: email,
         mode: 'payment',
         success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.SITE_DOMAIN}/payment-cancel`,
+        cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancel`,
       })
 
       res.send({url: session.url})
@@ -523,7 +593,7 @@ async function run() {
         const bookingInfo = {
         $set: {
           payment_status: "paid",
-          service_status: "service_on_the_way"
+          service_status: "wait_for_assign"
           }
         }
         const result = await bookingsCollection.updateOne(bookingQuery, bookingInfo);
