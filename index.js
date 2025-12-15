@@ -28,7 +28,7 @@ const verifyFirebaseToken = async (req, res, next) => {
 
     // Firebase Admin  token verify
     const decodedUser = await admin.auth().verifyIdToken(token);
-    console.log(decodedUser)
+    // console.log(decodedUser)
     req.user = decodedUser; 
 
     next(); 
@@ -467,14 +467,20 @@ async function run() {
     }) 
 //decoded need
     app.get('/my-bookings', verifyFirebaseToken, async (req, res) => {
+
       try {
+        const { limit, skip, } = req.query;
+        console.log(limit , skip)
         const { email } = req.query;
         const query = {};
       if (email) {
         query.client_email = email;
-      }
-        const result = await bookingsCollection.find(query).sort({created_At: -1}).toArray();
-        res.status(200).send(result);
+        }
+
+        const count = await bookingsCollection.countDocuments(query)
+        console.log(count)
+        const bookingsRes = await bookingsCollection.find(query).limit(Number(limit)).skip(Number(skip)).sort({created_At: -1}).toArray();
+        res.status(200).send({bookingsRes, count});
       } catch (error) {
         console.log(error);
         res.status(500).send({message: "Internal Server Error"})
