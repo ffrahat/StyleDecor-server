@@ -29,8 +29,8 @@ const verifyFirebaseToken = async (req, res, next) => {
     // Firebase Admin  token verify
     const decodedUser = await admin.auth().verifyIdToken(token);
     // console.log(decodedUser)
-    req.user = decodedUser; 
-
+    req.user = decodedUser.email; 
+ 
     next(); 
 
   } catch (error) {
@@ -455,7 +455,7 @@ async function run() {
 
         // if paid not showing cancelled
         if (sortBy === 'payment_status' && sortOrder === 'paid') {
-          query.service_status = 'service_on_the_way';
+          query.service_status = 'wait_for_assign';
         }
       }
 
@@ -501,6 +501,31 @@ async function run() {
         res.send(cancelBooking)
       }
     })
+
+
+    // Edit booking
+    app.patch('/bookings/:updateId/update', async (req, res) => {
+      const { updateId } = req.params;
+      const updateInfo = req.body;
+      const query = {_id: new ObjectId(updateId)}
+      const updatedDoc = {
+        $set: {
+          booking_region: updateInfo.booking_region,
+          booking_district: updateInfo.booking_district,
+          booking_date: updateInfo.booking_date,
+          client_message: updateInfo.client_message
+        }
+      }
+
+
+      const result = await bookingsCollection.updateOne(query, updatedDoc);
+      res.send(result)
+
+
+
+    })
+
+
 
     // delete my bookings
 
