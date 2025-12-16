@@ -249,9 +249,23 @@ async function run() {
 
     // My Asssign Project 
     app.get('/my-assigned-projects', async (req, res) => {
-      const { email } = req.query;
+
+
+
+      const { email,schedule } = req.query;
+      const query = {};
+     
+      if (email) {
+        query.decorator_email = email;
+      }
+
+      if (schedule) {
+        const isoDate = new Date().toISOString();
+        const formattedDate = isoDate.split("T")[0];
+        query.booking_date = formattedDate;
+      }
       
-      const query = {decorator_email: email };
+  
       const result = await bookingsCollection.find(query).toArray();
       res.send(result);
     })
@@ -259,8 +273,26 @@ async function run() {
 
     // update service status by decorators
     app.patch('/update-service-status', async (req, res) => {
-      const { id } = req.query;
+      const { id, email } = req.query;
       const serviceStatus = req.body;
+
+       // Update Decorator
+      if (serviceStatus.service_status === 'completed') {
+         const decoratorQuery = { email : email };
+          const decInfo = {
+        $set: {
+           work_status: 'available'
+        }
+      }
+
+      const decoratroResult = await decoratorsCollection.updateOne(decoratorQuery, decInfo)
+      }
+
+
+
+
+
+      // update status
       const query = { _id: new ObjectId(id) };
       const updatedDoc = {
         $set: {
@@ -270,6 +302,12 @@ async function run() {
 
       const result = await bookingsCollection.updateOne(query, updatedDoc);
       res.send(result);
+
+
+     
+     
+      
+
 
     } )
 
