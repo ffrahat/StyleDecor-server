@@ -29,7 +29,7 @@ const verifyFirebaseToken = async (req, res, next) => {
     // Firebase Admin  token verify
     const decodedUser = await admin.auth().verifyIdToken(token);
     // console.log(decodedUser)
-    req.user = decodedUser.email; 
+    req.decoded_email = decodedUser.email; 
  
     next(); 
 
@@ -71,9 +71,9 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     
-      await client.connect();
-      await client.db("admin").command({ ping: 1 });
-      console.log("Pinged your deployment. You successfully connected to MongoDB!");
+      // await client.connect();
+      // await client.db("admin").command({ ping: 1 });
+      // console.log("Pinged your deployment. You successfully connected to MongoDB!");
         
 
       // Crud Operations
@@ -84,6 +84,23 @@ async function run() {
     const paymentsCollection = db.collection('payments');
     const decoratorsCollection = db.collection('decorators');
     const coveragesCollection = db.collection('coverage');
+
+
+    // Verify Adimn
+    // must be use after verifyfbtoken
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded_email;
+
+      const query = { email };
+
+      const user = await usersCollection.findOne(query);
+
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({ message: "UnAuthorized Access" });
+      }
+
+      next();
+    };
 
 
       //   Users Related APis
@@ -188,7 +205,7 @@ async function run() {
 
 
   // Decorators related apis
-    app.get('/decorators',  async (req, res) => {
+    app.get('/decorators', verifyFirebaseToken,  async (req, res) => {
       
       const { work_status, application_status, district } = req.query;
       const query = {}
@@ -217,7 +234,7 @@ async function run() {
 
 
     // Assign Decorators
-    app.patch('/assign-decorator', async (req, res) => {
+    app.patch('/assign-decorator', verifyFirebaseToken, async (req, res) => {
       const { booking_id } = req.query;
       const decoratorInfo = req.body;
 
@@ -248,12 +265,20 @@ async function run() {
 
 
     // My Asssign Project 
-    app.get('/my-assigned-projects', async (req, res) => {
+    app.get('/my-assigned-projects',verifyFirebaseToken, async (req, res) => {
 
 
 
       const { email,schedule } = req.query;
       const query = {};
+
+      const decoded_email = req.decoded_email;
+
+      if (decoded_email !== email) {
+        return res.status(401).send({message: "Unauthorize Access"})
+      }
+
+
      
       if (email) {
         query.decorator_email = email;
@@ -271,8 +296,33 @@ async function run() {
     })
 
 
+    // My Earnig Summery
+    app.get('/my-earnings-summery',verifyFirebaseToken, async (req, res) => {
+
+
+
+      const { email } = req.query;
+      const query = {};
+     
+      if (email) {
+        query.decorator_email = email,
+        query.service_status = "completed"
+      }
+
+  
+      const result = await bookingsCollection.find(query).toArray();
+      res.send(result)
+     
+    })
+
+
+
+
+
+
+
     // update service status by decorators
-    app.patch('/update-service-status', async (req, res) => {
+    app.patch('/update-service-status',verifyFirebaseToken, async (req, res) => {
       const { id, email } = req.query;
       const serviceStatus = req.body;
 
@@ -431,7 +481,7 @@ async function run() {
 
     // Add Services Adimin
 
-    app.post('/services', verifyFirebaseToken, async (req, res) => {
+    app.post('/services', verifyFirebaseToken, verifyAdmin, async (req, res) => {
       const newServiceInfo = req.body;
       const result = await servicesCollection.insertOne(newServiceInfo);
       res.send(result)
@@ -439,7 +489,7 @@ async function run() {
 
 
     // edit service 
-    app.patch('/services/:id/edit', verifyFirebaseToken, async (req, res) => {
+    app.patch('/services/:id/edit', verifyFirebaseToken, verifyAdmin, async (req, res) => {
       const info = req.body;
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
@@ -507,9 +557,23 @@ async function run() {
     app.get('/my-bookings', verifyFirebaseToken, async (req, res) => {
 
       try {
+
+        
+
+
         const { limit, skip, } = req.query;
         console.log(limit , skip)
         const { email } = req.query;
+
+
+        // verify token
+        const decoded_email = req.decoded_email;
+
+      if (decoded_email !== email) {
+        return res.status(401).send({message: "Unauthorize Access"})
+      }
+
+
         const query = {};
       if (email) {
         query.client_email = email;
@@ -524,6 +588,73 @@ async function run() {
         res.status(500).send({message: "Internal Server Error"})
       }
     })
+
+
+    // dashboard
+
+        app.get('/my-bookings-dashboard',verifyFirebaseToken, async (req, res) => {
+
+          try {
+
+          const email = req.decoded_email;
+
+          const query = { email };
+
+          const user = await usersCollection.findOne(query);
+
+          if (user.role === "admin") {
+              const cancelQuery = {
+              service_status: 'cancelled',
+            }
+
+            const completedQuery = {
+            service_status: 'completed',
+              
+            }
+
+            const count = await bookingsCollection.countDocuments()
+            const cancelled_booking = await bookingsCollection.countDocuments(cancelQuery);
+            const completed_booking = await bookingsCollection.countDocuments(completedQuery);
+
+                return res.status(200).send({ count, cancelled_booking, completed_booking});
+              }
+        
+            
+            // user
+
+            const { userEmail } = req.query;
+            const userQuery = {};
+
+            if (userEmail) {
+              userQuery.client_email = userEmail;
+            }
+
+            const cancelQuery = {
+              service_status: 'cancelled',
+              client_email:  userEmail
+            }
+
+            const completedQuery = {
+            service_status: 'completed',
+            client_email:  userEmail
+            }
+
+            const count = await bookingsCollection.countDocuments(userQuery)
+            const cancelled_booking = await bookingsCollection.countDocuments(cancelQuery);
+            const completed_booking = await bookingsCollection.countDocuments(completedQuery);
+
+            return res.status(200).send({ count, cancelled_booking, completed_booking});
+
+
+
+      
+      } catch (error) {
+        console.log(error);
+        res.status(500).send({message: "Internal Server Error"})
+      }
+    })
+
+
 
     // cancel booking
     app.patch('/cancel-booking',verifyFirebaseToken, async (req, res) => {
@@ -542,7 +673,7 @@ async function run() {
 
 
     // Edit booking
-    app.patch('/bookings/:updateId/update', async (req, res) => {
+    app.patch('/bookings/:updateId/update',verifyFirebaseToken, async (req, res) => {
       const { updateId } = req.params;
       const updateInfo = req.body;
       const query = {_id: new ObjectId(updateId)}
@@ -641,6 +772,25 @@ async function run() {
       res.send({url: session.url})
       
     });
+
+
+    app.get('/my-payments-history',verifyFirebaseToken, async (req, res) => {
+      const { email } = req.query;
+
+      const decoded_email = req.decoded_email;
+
+      if (decoded_email !== email) {
+        return res.status(401).send({message: "Unauthorize Access"})
+      }
+
+      const query = {};
+      if (email) {
+        query.client_email = email
+      }
+
+      const result = await paymentsCollection.find(query).sort({ paidAt: -1 }).toArray();
+      res.send(result)
+    })
       
 
 
