@@ -491,6 +491,7 @@ async function run() {
     // edit service 
     app.patch('/services/:id/edit', verifyFirebaseToken, verifyAdmin, async (req, res) => {
       const info = req.body;
+      console.log(info)
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const updateInfo = {
@@ -500,6 +501,7 @@ async function run() {
           cost: info.cost,  
           description: info.description,
           imageUrl: info.imageUrl,
+          imageAlt: info.imageAlt,
           images: info.images,
           unit: info.unit,
           createdByEmail: info.createdByEmail,
